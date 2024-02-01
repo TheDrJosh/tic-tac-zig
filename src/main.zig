@@ -1,9 +1,5 @@
 const std = @import("std");
 
-// const rogueutil = @cImport(@cInclude("rogueutil.h"));
-// const rogueutil = @import("rogueutil.zig");
-const termlib = @import("olcPixelGameEngine");
-
 pub const Board = struct {
     inner: [9]?Player,
 
@@ -441,32 +437,12 @@ const Difficulty = enum {
     Hard,
 };
 
-//use (https://github.com/sakhmatd/rogueutil) to test c intergration
-
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
-    // var state = try main_menu(gpa.allocator());
+    var state = try main_menu(gpa.allocator());
 
-    // try state.play();
-    var term = try termlib.Term.init(gpa.allocator());
-    defer term.deinit();
-
-    try term.setFgColor(7, 0);
-    try term.setAttribute(.Italic);
-    try term.setCell(10, 10, 'X');
-    try term.setCellUtf8(12, 10, "Ö");
-
-    while (true) {
-        var evt = try term.pollEvent();
-
-        // if (needs_to_terminate) break;
-
-        if (evt == .key) {}
-        // do something...
-
-        term.update();
-    }
+    try state.play();
 }
 
 test "board numbers" {
