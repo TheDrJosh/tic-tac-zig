@@ -1,5 +1,4 @@
 const std = @import("std");
-const min_max = @import("min_max.zig");
 
 pub const Board = struct {
     inner: [9]?Player,
@@ -109,73 +108,18 @@ pub const Board = struct {
         var moves = std.ArrayList(usize).init(allocator);
         errdefer moves.deinit();
         for (self.inner, 0..) |cell, i| {
-            if (cell != null) {
+            if (cell == null) {
                 try moves.append(i);
             }
         }
         return moves;
     }
 
-    // def minimax(game)
-    //     return score(game) if game.over?
-    //     scores = [] # an array of scores
-    //     moves = []  # an array of moves
-
-    //     # Populate the scores array, recursing as needed
-    //     game.get_available_moves.each do |move|
-    //         possible_game = game.get_new_state(move)
-    //         scores.push minimax(possible_game)
-    //         moves.push move
-    //     end
-
-    //     # Do the min or the max calculation
-    //     if game.active_turn == @player
-    //         # This is the max calculation
-    //         max_score_index = scores.each_with_index.max[1]
-    //         @choice = moves[max_score_index]
-    //         return scores[max_score_index]
-    //     else
-    //         # This is the min calculation
-    //         min_score_index = scores.each_with_index.min[1]
-    //         @choice = moves[min_score_index]
-    //         return scores[min_score_index]
-    //     end
-    // end
-    fn minmax(self: *const Board, active_turn: Player, computer: Player, allocator: std.mem.Allocator) !i32 {
-        if (self.win_state()) |winner| {
-            return winner.to_number();
-        }
-        var scores = std.ArrayList(i32).init(allocator);
-        defer scores;
-        var moves = std.ArrayList(usize).init(allocator);
-        defer moves.deinit();
-
-        const av_moves = try self.available_moves(allocator);
-        defer av_moves.deinit();
-
-        for (av_moves.items) |move| {
-            var new_board: Board = undefined;
-            @memcpy(&new_board, &self);
-            new_board.inner[move] = active_turn;
-            try scores.append(new_board.minmax(active_turn.other(), computer, allocator));
-            try moves.append(move);
-        }
-
-        if (active_turn == computer) {
-            var max_score_index = null;
-            _ = max_score_index;
-            var max_score = null;
-            _ = max_score;
-        }
-
-        errdefer scores.deinit();
+    pub fn draw_line_gap() void {
+        std.debug.print("-+-+-\n", .{});
     }
     pub fn draw_line(self: *const Board, line: u8) void {
         std.debug.print("{c}|{c}|{c}\n", .{ Player.to_letter_optional(&self.inner[0 + line * 3]), Player.to_letter_optional(&self.inner[1 + line * 3]), Player.to_letter_optional(&self.inner[2 + line * 3]) });
-    }
-
-    pub fn draw_line_gap() void {
-        std.debug.print("-+-+-\n", .{});
     }
 
     pub fn draw(self: *const Board) void {
@@ -186,6 +130,8 @@ pub const Board = struct {
         self.draw_line(2);
     }
 };
+
+const MinMaxResult = struct { score: i32, choice: ?u8 };
 
 pub const BoardMove = struct {
     board: Board,
@@ -250,25 +196,19 @@ const GameState = struct {
     board: Board,
     active_player: Player,
     computer_player: ?Player,
+    allocator: std.mem.Allocator,
 
-    fn new(start_player: Player, computer_player: ?Player) GameState {
+    fn new(start_player: Player, computer_player: ?Player, allocator: std.mem.Allocator) GameState {
         return GameState{
             .active_player = start_player,
             .board = Board.empty(),
             .computer_player = computer_player,
+            .allocator = allocator,
         };
     }
 
     fn deinit(self: GameState) void {
         self.min_max.deinit();
-    }
-
-    fn draw_line(self: *GameState, line: u8) void {
-        std.debug.print("{c}|{c}|{c}\n", .{ Player.to_letter_optional(&self.board[0 + line * 3]), Player.to_letter_optional(&self.board[1 + line * 3]), Player.to_letter_optional(&self.board[2 + line * 3]) });
-    }
-
-    fn draw_line_gap() void {
-        std.debug.print("-+-+-\n", .{});
     }
 
     fn draw(self: *GameState) void {
@@ -277,6 +217,54 @@ const GameState = struct {
         self.board.draw();
     }
 
+    fn minmax(
+        self: *const GameState,
+        idepth: i32,
+    ) !MinMaxResult {
+        if (self.board.win_state()) |winner| {
+            return MinMaxResult{ .score = winner.to_number() * 10 - idepth, .choice = null };
+        }
+        var depth = idepth + 1;
+
+        var scores = std.ArrayList(i32).init(self.allocator);
+        defer scores.deinit();
+        var moves = std.ArrayList(usize).init(self.allocator);
+        defer moves.deinit();
+
+        const av_moves = try self.board.available_moves(self.allocator);
+        defer av_moves.deinit();
+
+        for (av_moves.items) |move| {
+            var new_board: Board = Board.empty();
+            @memcpy(&new_board.inner, &self.board.inner);
+            new_board.inner[move] = self.active_player;
+            var new_game_state = GameState{
+                .board = new_board,
+                .active_player = self.active_player.other(),
+                .computer_player = self.computer_player,
+                .allocator = self.allocator,
+            };
+
+            try scores.append((try new_game_state.minmax(depth)).score);
+            try moves.append(move);
+        }
+
+        var score_index: usize = 0;
+
+        for (scores.items, 0..) |score, i| {
+            if (self.active_player == self.computer_player) {
+                if (score < scores.items[score_index]) {
+                    score_index = i;
+                }
+            } else {
+                if (score > scores.items[score_index]) {
+                    score_index = i;
+                }
+            }
+        }
+
+        return MinMaxResult{ .score = scores.items[score_index], .choice = @truncate(moves.items[score_index]) };
+    }
     fn get_input() !u8 {
         const stdin = std.io.getStdIn().reader();
 
@@ -286,36 +274,43 @@ const GameState = struct {
 
         while (try stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
             if (line.len == 4 and line[1] == ':') {
-                var x: ?u8 = null;
-                var y: ?u8 = null;
-
-                switch (line[0]) {
-                    '1' => x = 0,
-                    '2' => x = 1,
-                    '3' => x = 2,
-                    else => std.debug.print("{c} is not a valid column.\n", .{line[0]}),
-                }
-
-                switch (line[2]) {
-                    '1' => y = 0,
-                    '2' => y = 1,
-                    '3' => y = 2,
-                    else => std.debug.print("{c} is not a valid row.\n", .{line[2]}),
-                }
-
-                if (x != null and y != null) {
-                    return x.? + y.? * 3;
-                }
+                var x: u8 = switch (line[0]) {
+                    '1' => 0,
+                    '2' => 1,
+                    '3' => 2,
+                    else => {
+                        std.debug.print("{c} is not a valid column.\n", .{line[0]});
+                        continue;
+                    },
+                };
+                var y: u8 = switch (line[2]) {
+                    '1' => 0,
+                    '2' => 1,
+                    '3' => 2,
+                    else => {
+                        std.debug.print("{c} is not a valid row.\n", .{line[2]});
+                        continue;
+                    },
+                };
+                return x + y * 3;
             } else {
                 std.debug.print("incorrect input format.\n", .{});
             }
         }
-
-        return 0;
+        return try get_input();
     }
 
     fn turn(self: *GameState) !void {
-        var input = try GameState.get_input();
+        var c_input: ?u8 = null;
+        if (self.computer_player) |cp| {
+            if (cp == self.active_player) {
+                if ((try self.minmax(0)).choice) |choice| {
+                    c_input = choice;
+                }
+            }
+        }
+
+        var input = if (c_input) |ci| ci else try GameState.get_input();
 
         while (true) {
             if (self.board.inner[input] == null) {
@@ -348,16 +343,106 @@ const GameState = struct {
     }
 };
 
+fn ginput() !?[]u8 {
+    const stdin = std.io.getStdIn().reader();
+    var buf: [1024]u8 = undefined;
+
+    return try stdin.readUntilDelimiterOrEof(&buf, '\n');
+}
+
+fn main_menu(allocator: std.mem.Allocator) !GameState {
+    std.debug.print("How many players?: (1 or 2)\n", .{});
+    var is_multiplayer: ?bool = null;
+
+    while (is_multiplayer == null) {
+        if (try ginput()) |player_count_input| {
+            if (player_count_input.len == 2) {
+                if (player_count_input[0] == '1') {
+                    is_multiplayer = false;
+                    break;
+                } else if (player_count_input[0] == '2') {
+                    is_multiplayer = true;
+                    break;
+                }
+            }
+        }
+        std.debug.print("Invalid Input\n", .{});
+    }
+
+    std.debug.print("Who goes first?: (X or O)\n", .{});
+    var start_player: ?Player = null;
+
+    while (start_player == null) {
+        if (try ginput()) |start_player_input| {
+            if (start_player_input.len == 2) {
+                if (start_player_input[0] == 'X' or start_player_input[0] == 'x') {
+                    start_player = Player.X;
+                    break;
+                } else if (start_player_input[0] == 'O' or start_player_input[0] == 'o') {
+                    start_player = Player.O;
+                    break;
+                }
+            }
+        }
+        std.debug.print("Invalid Input\n", .{});
+    }
+
+    if (is_multiplayer orelse true) {
+        return GameState.new(start_player orelse Player.X, null, allocator);
+    } else {
+        std.debug.print("What is the computer?: (X or O)\n", .{});
+        var computer_player: ?Player = null;
+        while (computer_player == null) {
+            if (try ginput()) |computer_player_input| {
+                if (computer_player_input.len == 2) {
+                    if (computer_player_input[0] == 'X' or computer_player_input[0] == 'x') {
+                        computer_player = Player.X;
+                        break;
+                    } else if (computer_player_input[0] == 'O' or computer_player_input[0] == 'o') {
+                        computer_player = Player.O;
+                        break;
+                    }
+                }
+            }
+            std.debug.print("Invalid Input\n", .{});
+        }
+
+        std.debug.print("What is the difficulty?: (1, 2, or 3)\n", .{});
+        var computer_difficulty: ?Difficulty = null;
+        while (computer_difficulty == null) {
+            if (try ginput()) |computer_difficulty_input| {
+                if (computer_difficulty_input.len == 2) {
+                    if (computer_difficulty_input[0] == '1') {
+                        computer_difficulty = Difficulty.Easy;
+                        break;
+                    } else if (computer_difficulty_input[0] == '2') {
+                        computer_difficulty = Difficulty.Medium;
+                        break;
+                    } else if (computer_difficulty_input[0] == '3') {
+                        computer_difficulty = Difficulty.Hard;
+                        break;
+                    }
+                }
+            }
+            std.debug.print("Invalid Input\n", .{});
+        }
+
+        return GameState.new(start_player orelse Player.X, computer_player orelse Player.O, allocator);
+    }
+}
+
+const Difficulty = enum {
+    Easy,
+    Medium,
+    Hard,
+};
+
+//use (https://github.com/sakhmatd/rogueutil) to test c intergration
+
 pub fn main() !void {
-    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
-    const start_player = Player.X;
-
-    // var tree = min_max_tree(start_player, gpa.allocator());
-
-    // std.debug.print("{any}\n", .{tree});
-
-    var state = GameState.new(start_player, Player.O);
+    var state = try main_menu(gpa.allocator());
 
     try state.play();
 }
@@ -370,49 +455,10 @@ test "board numbers" {
     try std.testing.expect(std.mem.eql(?Player, &board.inner, &number_board.inner));
 }
 
-test "min max tree" {
-    // std.debug.print("\n", .{});
-
-    var tree = try min_max.MinMaxTree.init(std.testing.allocator);
-    defer tree.deinit();
-
-    var index: ?usize = 0;
-
-    while (index) |i| {
-        if (tree.all_boards[i]) |*node| {
-            if (node.children.items.len > 0) {
-                var move = node.children.items[0];
-                Board.from_number(i).draw();
-                std.debug.print("{c} went\nid: {d}\n\n", .{ move.moved.to_letter(), i });
-                index = move.index;
-            } else {
-                index = null;
-            }
-        } else {
-            index = null;
-        }
-    }
-}
-
 test "min max predict" {
-    Board.from_number(14076).draw();
-    std.debug.print("\n\n", .{});
-    Board.from_number(14077).draw();
-
-    var tree = try min_max.MinMaxTree.init(std.testing.allocator);
-    defer tree.deinit();
-
-    Board.from_number(14076).draw();
-    std.debug.print("{any}\n", .{tree.all_boards[14076].?.children.items});
-
-    std.debug.print("\n\n", .{});
-    Board.from_number(14077).draw();
-    std.debug.print("{any}\n", .{tree.all_boards[14077].?.children.items});
-
     var test_board = Board.from_number(0);
 
-    var res = tree.get_best_move(&test_board, Player.X);
-    _ = res;
+    var res = test_board.minmax(Player.O, Player.X, std.testing.allocator);
 
-    // std.debug.print("{any}", .{res});
+    std.debug.print("{any}", .{res});
 }
