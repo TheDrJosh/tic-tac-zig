@@ -2,8 +2,12 @@
     .name = "tic-tac",
     .version = "0.1.0",
     .dependencies = .{
-        .term = .{
-            .url = "https://codeberg.org/gnarz/term/archive/main.tar.gz",
+        // .term = .{
+        //     .url = "https://codeberg.org/gnarz/term/archive/main.tar.gz",
+        //     .hash = "12201c5ea711c701be15ca401368c1c77e050b43ebb92f98f6cdac7389f900cc8c0b",
+        // },
+        .olcPixelGameEngine = .{
+            .url = "https://github.com/OneLoneCoder/olcPixelGameEngine/archive/refs/tags/v2.23.tar.gz",
             .hash = "12201c5ea711c701be15ca401368c1c77e050b43ebb92f98f6cdac7389f900cc8c0b",
         },
     },
