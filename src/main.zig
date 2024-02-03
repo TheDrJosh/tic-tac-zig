@@ -195,15 +195,17 @@ pub const WinState = enum {
 const GameState = struct {
     board: Board,
     active_player: Player,
-    computer_player: ?Player,
+    computer_player: ?ComputerInfo,
     allocator: std.mem.Allocator,
+    prng: std.rand.DefaultPrng,
 
-    fn new(start_player: Player, computer_player: ?Player, allocator: std.mem.Allocator) GameState {
+    fn new(start_player: Player, computer_player: ?ComputerInfo, allocator: std.mem.Allocator) GameState {
         return GameState{
             .active_player = start_player,
             .board = Board.empty(),
             .computer_player = computer_player,
             .allocator = allocator,
+            .prng = std.rand.DefaultPrng.init(0),
         };
     }
 
@@ -243,6 +245,7 @@ const GameState = struct {
                 .active_player = self.active_player.other(),
                 .computer_player = self.computer_player,
                 .allocator = self.allocator,
+                .prng = self.prng,
             };
 
             try scores.append((try new_game_state.minmax(depth)).score);
@@ -252,7 +255,7 @@ const GameState = struct {
         var score_index: usize = 0;
 
         for (scores.items, 0..) |score, i| {
-            if (self.active_player == self.computer_player) {
+            if (self.active_player == self.computer_player.?.player) {
                 if (score < scores.items[score_index]) {
                     score_index = i;
                 }
@@ -270,10 +273,10 @@ const GameState = struct {
 
         var buf: [1024]u8 = undefined;
 
-        std.debug.print("Input must be in form \"x:y\" ex: 1:1.\n", .{});
+        std.debug.print("Input must be in form \"x,y\" ex: 1,1.\n", .{});
 
         while (try stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
-            if (line.len == 4 and line[1] == ':') {
+            if (line.len == 4 and line[1] == ',') {
                 var x: u8 = switch (line[0]) {
                     '1' => 0,
                     '2' => 1,
@@ -300,13 +303,38 @@ const GameState = struct {
         return try get_input();
     }
 
+    fn computer_turn(self: *GameState) !u8 {
+        var choice = (try self.minmax(0)).choice orelse 0;
+        if (self.computer_player.?.difficulty == Difficulty.Hard) {
+            return choice;
+        }
+
+        var available = try self.board.available_moves(self.allocator);
+        defer available.deinit();
+
+        var random_available_index = self.prng.random().intRangeLessThan(usize, 0, available.items.len);
+
+        var random_available: u8 = @truncate(available.items[random_available_index]);
+
+        switch (self.prng.random().intRangeLessThan(u8, 0, 100)) {
+            0...49 => return choice,
+            50...74 => {
+                if (self.computer_player.?.difficulty == Difficulty.Easy) {
+                    return random_available;
+                } else {
+                    return choice;
+                }
+            },
+            75...99 => return random_available,
+            else => unreachable,
+        }
+    }
+
     fn turn(self: *GameState) !void {
         var c_input: ?u8 = null;
         if (self.computer_player) |cp| {
-            if (cp == self.active_player) {
-                if ((try self.minmax(0)).choice) |choice| {
-                    c_input = choice;
-                }
+            if (cp.player == self.active_player) {
+                c_input = try self.computer_turn();
             }
         }
 
@@ -390,7 +418,7 @@ fn main_menu(allocator: std.mem.Allocator) !GameState {
     if (is_multiplayer orelse true) {
         return GameState.new(start_player orelse Player.X, null, allocator);
     } else {
-        std.debug.print("What is the computer?: (X or O)\n", .{});
+        std.debug.print("who is the computer?: (X or O)\n", .{});
         var computer_player: ?Player = null;
         while (computer_player == null) {
             if (try ginput()) |computer_player_input| {
@@ -427,9 +455,14 @@ fn main_menu(allocator: std.mem.Allocator) !GameState {
             std.debug.print("Invalid Input\n", .{});
         }
 
-        return GameState.new(start_player orelse Player.X, computer_player orelse Player.O, allocator);
+        return GameState.new(start_player orelse Player.X, ComputerInfo{ .player = computer_player orelse Player.O, .difficulty = computer_difficulty orelse Difficulty.Medium }, allocator);
     }
 }
+
+const ComputerInfo = struct {
+    player: Player,
+    difficulty: Difficulty,
+};
 
 const Difficulty = enum {
     Easy,
